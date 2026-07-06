@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Data and dataset cache (avoid committing large CSVs/Parquets)
+data/
+*.csv
+*.parquet
+*.jsonl
+
+# Logs and checkpoints
+logs/
+checkpoints/
+models/
+*.log
+
+# IDEs and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
