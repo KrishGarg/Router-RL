@@ -6,10 +6,12 @@ from gymnasium import spaces
 
 class RouterGLEnv(gym.Env):
     """
-    A custom Gymnasium environment for multi-turn LLM routing.
-    Each episode represents a single conversation containing multiple turns.
-    At each turn, the router chooses which model to handle the query or to reject it.
-    The budget is global for the conversation and resets at the start of the episode.
+    A custom Gymnasium environment for LLM routing under a global token budget.
+    Supports two modes:
+    1. Global Stream Mode (global_stream=True): The budget of 10,000 tokens is allocated 
+       across a continuous stream of multiple conversations (up to max_steps queries).
+    2. Per-Conversation Mode (global_stream=False): The budget is reset at the start 
+       of each conversation.
     """
     metadata = {"render_modes": ["human"]}
 
@@ -20,7 +22,9 @@ class RouterGLEnv(gym.Env):
         betas=None,
         active_beta_idx=0,
         depletion_penalty=-10.0,
-        shuffle=True
+        shuffle=True,
+        global_stream=True,
+        max_steps=100
     ):
         super().__init__()
         
@@ -50,7 +54,7 @@ class RouterGLEnv(gym.Env):
         # 4: Reject/Drop query
         self.action_space = spaces.Discrete(5)
         
-        # Define Observation Space (Box space of size 28)
+        # Define Observation Space
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -61,7 +65,7 @@ class RouterGLEnv(gym.Env):
         # Model mapping
         self.model_keys = ["qwen_06", "ministral", "qwen_30", "qwen_30_inst"]
         
-        # Group data by conversation hash to facilitate sequential steps
+        # Group data by conversation hash
         print("Grouping conversation logs...")
         self.conversations = {}
         for h, grp in df.groupby("conversation_hash"):
@@ -69,6 +73,11 @@ class RouterGLEnv(gym.Env):
             
         self.conversation_hashes = list(self.conversations.keys())
         self.shuffle = shuffle
+        
+        # Mode settings
+        self.global_stream = global_stream
+        self.max_steps = max_steps
+        self.step_count = 0
         
         # RL hyperparameters
         self.max_budget = max_budget
@@ -84,9 +93,11 @@ class RouterGLEnv(gym.Env):
         self.num_turns_total = 0
         self.conv_index = 0
         
-        print(f"Environment initialized with {len(self.conversations)} conversations.")
+        print(f"Environment initialized in {'GLOBAL STREAM' if global_stream else 'PER-CONVERSATION'} mode.")
         print(f"Observation dimension: {self.observation_dim} (1 budget + {self.num_features} query/context features)")
         print(f"Betas: {self.betas} (Active beta: {self.betas[self.active_beta_idx]})")
+        if global_stream:
+            print(f"Global Budget: {self.max_budget} tokens | Max turn steps per episode: {self.max_steps}")
 
     def _get_obs(self):
         """Assembles and returns the current state vector."""
@@ -104,11 +115,8 @@ class RouterGLEnv(gym.Env):
         obs = np.concatenate([norm_budget, features])
         return obs
 
-    def reset(self, seed=None, options=None):
-        """Resets the environment for a new conversation episode."""
-        super().reset(seed=seed)
-        
-        # Select next conversation
+    def _select_next_conversation(self):
+        """Helper to load a new conversation hash and reset turn counters."""
         if self.shuffle:
             self.current_conv_hash = self.np_random.choice(self.conversation_hashes)
         else:
@@ -118,13 +126,21 @@ class RouterGLEnv(gym.Env):
         self.current_conv_df = self.conversations[self.current_conv_hash]
         self.num_turns_total = len(self.current_conv_df)
         self.current_turn = 0
+
+    def reset(self, seed=None, options=None):
+        """Resets the environment for a new episode."""
+        super().reset(seed=seed)
+        
         self.remaining_budget = float(self.max_budget)
+        self.step_count = 0
+        self._select_next_conversation()
         
         obs = self._get_obs()
         info = {
             "conversation_hash": self.current_conv_hash,
             "total_turns": self.num_turns_total,
-            "remaining_budget": self.remaining_budget
+            "remaining_budget": self.remaining_budget,
+            "step_count": self.step_count
         }
         
         return obs, info
@@ -133,13 +149,8 @@ class RouterGLEnv(gym.Env):
         """
         Executes one step in the environment.
         """
-        # Ensure action is within bounds
         assert self.action_space.contains(action), f"Invalid action: {action}"
         
-        # Check if we are already out of turns (should not happen if terminated is handled)
-        if self.current_turn >= self.num_turns_total:
-            return self._get_obs(), 0.0, True, False, {}
-            
         row = self.current_conv_df.iloc[self.current_turn]
         
         score = 0.0
@@ -157,7 +168,6 @@ class RouterGLEnv(gym.Env):
                 cost = model_tokens
                 self.remaining_budget -= model_tokens
             else:
-                # Budget depletion: model cannot be queried
                 score = 0.0
                 cost = 0.0
                 depletion = True
@@ -173,7 +183,7 @@ class RouterGLEnv(gym.Env):
         else:
             reward = score - active_beta * cost
             
-        # Calculate rewards for all betas to put in info dict
+        # Calculate rewards for all betas
         rewards_all_betas = {}
         for b in self.betas:
             if depletion:
@@ -181,13 +191,26 @@ class RouterGLEnv(gym.Env):
             else:
                 rewards_all_betas[b] = score - b * cost
                 
-        # Advance state
+        # Advance turn count and step count
         self.current_turn += 1
+        self.step_count += 1
         
-        # Terminate if conversation is over OR budget is depleted
-        terminated = (self.current_turn >= self.num_turns_total) or depletion
+        # Check transition conditions
+        conv_ended = (self.current_turn >= self.num_turns_total)
+        
+        if self.global_stream:
+            # Under global stream: if conversation ends but budget remains, move to next conversation
+            if conv_ended and not depletion:
+                self._select_next_conversation()
+                conv_ended = False # Reset flag for step_info context
+            
+            # Terminated if budget is depleted or step limit reached
+            terminated = depletion or (self.step_count >= self.max_steps)
+        else:
+            # Under per-conversation: terminated if conversation ends or budget is depleted
+            terminated = conv_ended or depletion
+            
         truncated = False
-        
         obs = self._get_obs()
         
         info = {
@@ -198,11 +221,12 @@ class RouterGLEnv(gym.Env):
             "cost": cost,
             "remaining_budget": self.remaining_budget,
             "rewards_all_betas": rewards_all_betas,
-            "budget_depleted": depletion
+            "budget_depleted": depletion,
+            "conv_ended": conv_ended,
+            "step_count": self.step_count
         }
         
         return obs, reward, terminated, truncated, info
 
     def render(self):
-        """Optional rendering for debugging."""
-        print(f"Conv: {self.current_conv_hash} | Turn: {self.current_turn}/{self.num_turns_total} | Budget: {self.remaining_budget:.1f}")
+        print(f"Step: {self.step_count} | Conv: {self.current_conv_hash} | Turn: {self.current_turn}/{self.num_turns_total} | Budget: {self.remaining_budget:.1f}")
