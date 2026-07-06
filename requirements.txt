@@ -1,0 +1,6 @@
+pandas
+numpy
+gymnasium
+stable-baselines3[extra]
+huggingface_hub
+matplotlib
