@@ -8,6 +8,24 @@ Our objective is to maximize overall system performance by balancing two competi
 
 ---
 
+## 🚀 Performance Benchmarks (Global Stream Mode)
+
+Here are the results evaluated over 200 stream episodes (representing 20,000 queries) under a global token budget of **10,000 tokens** per 100-query batch:
+
+| Policy / Agent | Type | Avg Quality | Queries Answered | Survival Rate |
+| :--- | :--- | :--- | :--- | :--- |
+| **Always_Cheap** | Heuristic | 2.880 | 55.5% | 0.5% |
+| **Always_Strong** | Heuristic | 2.378 | 24.8% | 0.0% |
+| **Threshold_Heuristic** | Heuristic | 2.590 | 28.7% | 0.0% |
+| **ppo_router_beta_0.01 (RL)** | **RL Agent** | **3.268** | **67.6%** | **5.5%** |
+
+### Column Explanations:
+* **Avg Quality**: The average LLM-as-a-judge score (0 to 10) awarded to responses across all 100 queries in the stream. Queries that were unanswered (due to early budget depletion) or rejected count as `0.0`.
+* **Queries Answered**: The fraction of the 100 queries in the stream that the policy successfully routed to an LLM before running out of budget.
+* **Survival Rate**: The percentage of 100-query episodes that completed without running out of tokens (budget depletion).
+
+---
+
 ## 1. Project Methodology
 
 We model the routing task as a **Markov Decision Process (MDP)** implemented in a custom Gymnasium environment:
