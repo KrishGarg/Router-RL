@@ -32,7 +32,7 @@ We model the routing task as a **Markov Decision Process (MDP)** implemented in 
 
 ### State Space, $S$ (28-dimensional vector)
 * **Normalized Remaining Budget** (1 dimension): $\frac{\text{Remaining Budget}}{\text{Max Budget}}$.
-* **Difficulty / Routing Gap** (1 dimension): The performance difference between the strongest and weakest models ($\text{Score}_{\text{strong}} - \text{Score}_{\text{weak}}$).
+* **Difficulty / Routing Gap** (1 dimension): The performance difference between the strongest and weakest models ($`\text{Score}_{\text{strong}} - \text{Score}_{\text{weak}}`$).
 * **Linguistic & Contextual Features** (26 dimensions): Query length, math/code/URL flags, prior context size, conversational dependency flags, and lexical overlaps.
 
 ### Action Space, $A$ (Discrete space of size 5)
@@ -42,7 +42,7 @@ We model the routing task as a **Markov Decision Process (MDP)** implemented in 
 * `3`: Route to **Qwen3-30B-A3B-Instruct** (Most expensive, highest quality)
 * `4`: **Reject / Drop query** (Zero token cost, zero quality score)
 
-### Reward Function, $R(s_t, a_t)$
+### Reward Function, $`R(s_t, a_t)`$
 $$\text{Reward}_t = \text{Score}_t - (\beta \times \text{Cost}_t)$$
 Where:
 * $\text{Score}_t$ is the LLM-as-a-judge score (0-10) for the selected model.
@@ -138,6 +138,6 @@ The comparison chart will be saved at `data/quality_cost_tradeoff.png`.
 
 * **The Quantiy vs. Quality Trade-off**: Under a strict 10k token budget, `Always_Strong` yields a lower average quality score (**2.38**) than `Always_Cheap` (**2.88**). This happens because `Always_Strong` depletes the budget after only 24 queries, leaving the remaining 76 queries completely unanswered. 
 * **The RL Advantage**: By learning when to spend tokens on the strong model (such as on coding/math tasks or high-difficulty queries) and when to conserve budget on simpler turns, the PPO agent trained with $\beta=0.01$ outperforms both heuristics—answering **67.6% of queries** and achieving an average quality score of **3.27**.
-* **Deployment Limitation**: The environment includes the pre-extracted `difficulty` feature ($Score_{strong} - Score_{weak}$) in the state vector. In a real-time production system, this score gap is not known before calling the models. In a real deployment, we would either:
+* **Deployment Limitation**: The environment includes the pre-extracted `difficulty` feature ($`Score_{strong} - Score_{weak}`$) in the state vector. In a real-time production system, this score gap is not known before calling the models. In a real deployment, we would either:
   1. Remove `difficulty` from the observation space and train the agent purely on the 26 raw features (which are instantly readable from the query text).
   2. Estimate the difficulty beforehand using a lightweight auxiliary model (like a 100M classifier).

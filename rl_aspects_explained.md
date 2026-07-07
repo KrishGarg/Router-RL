@@ -35,7 +35,7 @@ The action space is the set of possible choices the agent can make. We use a **D
 * Action $4$ represents a **Reject** (or Drop) action, which consumes $0$ tokens but outputs $0$ quality score.
 
 ### Transition Dynamics ($P$)
-The transition probability $P(s_{t+1} \mid s_t, a_t)$ defines the physics of our world—how the environment changes after the agent acts:
+The transition probability $`P(s_{t+1} \mid s_t, a_t)`$ defines the physics of our world—how the environment changes after the agent acts:
 1. **Budget Decrement**: If a model is queried, the remaining token budget is reduced by the output length of that model's response.
 2. **Turn Advancement**: The environment steps forward to the next turn in the conversation.
 3. **Global Stream Transitions**: In **Global Stream Mode**, if a conversation ends but the budget remains, the environment transitions to the first turn of a *new conversation*, preserving the remaining budget.
